@@ -1,0 +1,1514 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+```{=html}
+<style>
+  /* Estilo para centrar el contenido de la portada */
+  .cover-page {
+    text-align: center;
+    margin-top: 100px;
+    font-family: Arial, sans-serif;
+  }
+.cover-title {
+  font-size: 36px;
+  font-weight: bold;
+}
+.cover-subtitle {
+  font-size: 24px;
+  margin-top: 20px;
+}
+.cover-authors {
+  font-size: 18px;
+  margin-top: 30px;
+  line-height: 1.8;
+}
+.cover-date {
+  font-size: 16px;
+  margin-top: 40px;
+  font-style: italic;
+}
+</style>
+```
+
+::::::: cover-page
+::: cover-title
+Análisis de Datos y Machine Learning con R (Utilizando la librería Caret)
+:::
+
+::: cover-subtitle
+Grupo: DIN-A4
+:::
+
+::: cover-authors
+Integrante 1: Daniel Aliaga Sánchez - [daniel.a.s\@um.es](mailto:daniel.a.s@um.es){.email}<br> Integrante 2: Javier Guardiola González - [j.guardiolagonzalez\@um.es](mailto:j.guardiolagonzalez@um.es){.email}<br> Integrante 3: Mercedes López Caballero - [m.lopezcaballero\@um.es](mailto:m.lopezcaballero@um.es){.email}<br> Integrante 4: Samuel Muñoz Burillo - [s.munozburillo\@um.es](mailto:s.munozburillo@um.es){.email}<br>
+:::
+
+::: cover-date
+`r format(Sys.Date(), '%d/%m/%Y')`
+:::
+:::::::
+
+::: {style="page-break-after: always;"}
+:::
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Introducción
+Este documento corresponde a la práctica final de la asignatura Aprendizaje Computacional. Incluye el proceso relacionado con el análisis de datos y posterior procedimiento de Machine Learning aplicado a los datos correspondientes un dataset de concesión de créditos. 
+
+El objetivo de la práctica ha sido el de entrenar y evaluar ciertos modelos para poder obtener predicciones lo más fieles a la realidad posible. Para ello, hemos seleccionado 4 modelos diferentes, todos ellos entrenados según 3 datasets procesados de manera distinta para así poder llegar a la solución que mejor resultados nos proporcione. Estos 4 modelos son: Support Vector Machines (SVM), Random Forest (RF), Redes Neuronales Artificiales (ANN) y Análisis Discriminante Lineal (LDA). Después de su entrenamiento, procederemos a compararlos de dos modos: primero los propios modelos con sus 3 datasets distintos, y luego entre todos ellos, cogiendo el mejor dataset de cada uno por separado y comparando los 4 resultados finales. 
+
+Para poder llevar a cabo todo este proceso, comenzaremos con un análisis exploratorio de los datos seguido de su preprocesado de manera básica para poder tener los datos listos para el entrenamiento. Destacaremos varias variables haciendo un análisis más detallado de las mismas, y por último nos centraremos más de lleno en los propios datos de train. Cabe mencionar aquí que, los datos que recibimos, se pueden separar entre train (entrenamiento) y test (pruebas), de modo que usaremos los primeros para entrenar a los modelos y los últimos para realizar las pruebas correspondientes. En caso contrario, no podríamos asegurar que los resultados son consistentes, pues estaríamos entrenando y comprobando con los mismos datos.
+
+
+
+# Sección 1: Análisis Exploratorio de Datos y preproceso básico de datos
+
+## Carga de librerías
+
+Para poder llevar a cabo cada uno de los procedimientos necesarios para tanto el análisis como el entrenamiento de modelos, vamos a precisar de ciertas librerías. Por ello, vamos a importarlas en este apartado para que, así, estén presentes a lo largo de todo el documento. 
+```{r}
+library(ggplot2)
+library(caret)
+library(corrplot)
+library(psych)
+library(dplyr)
+library(RANN)
+library(gridExtra)
+library(lattice)
+library(fastDummies)
+library(MASS)
+library(tidyr)
+```
+
+## Carga de datos
+
+Importamos los datos del dataset y modificamos los nombres referentes a las columnas teniendo en cuenta la información contenida tanto en el fichero crx.names como en la web de la uci proporcionada (<https://archive.ics.uci.edu/dataset/27/credit+approval>). Para el preprocesamiento vamos a trabajar con una copia del dataset para no modificar los datos del original (original - credit / copia - ccredit):
+
+```{r}
+credit <- read.table("credit+approval/crx.data", sep = ",", header = FALSE, na.strings = "?")
+ccredit <- credit
+colnames(ccredit) <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8","A9", "A10", "A11", "A12", "A13", "A14", "A15", "A16")
+```
+
+Vamos a ver ahora el tipo de dato de cada una de las variables, las cuales clasificaremos en numéricas y categóricas:
+
+```{r}
+str(ccredit)
+c_categoricos <- paste0("A", c(1,4:7,9,10,12,13,16))
+c_numericos <- paste0("A", c(2,3,8,11,14,15))
+
+ccredit[c_categoricos] = data.frame(lapply(ccredit[c_categoricos], FUN=as.factor))
+ccredit[c_numericos] = data.frame(lapply(ccredit[c_numericos], FUN=as.numeric))
+```
+
+Como observamos en el dataset, tenemos 690 observaciones y 16 variables, de las cuales 15 son predictores (A1:A15) y una, objetivo (A16). 
+
+Como podemos ver, las variables A1, A4, A5, A6, A7, A9, A10, A12, A13 y A16 tienen como tipo "char", por lo que las clasificaremos como "Categóricas", mientras que el resto, A2, A3, A8, A11, A14 y A15, son numéricas, tipo num e int. Además, hemos convertido los 10 discretos a factores, incluyendo el objetivo, dado que esto ayuda a que la librería Caret pueda distinguir entre problemas de regresión y problemas de clasificación, siendo el nuestro de este último. También transformamos los int y num a numérico para obtener mayor precisión y flexibilidad.
+
+Para preparar los datos para tener un mejor análisis, vamos a hacer una copia de ccredit para trabajar en un conjunto sin datos desconocidos o nulos, es decir, sin NAs. No vamos a eliminarlos, simplemente los obviamos por el momento, pudiendo tratarlos más adelante.
+
+Como al importar la base de datos hemos indicado que "na.strings = "?" ", no tenemos que comprobar si hay alguna variable que obtenga el valor "?", puesto que esto le dice a R que cualquier "?" se convierta automáticamente en NA. Por ello, simplemente tratamos los valores de NA.
+
+```{r}
+sinNA<- na.omit(ccredit)
+colnames(sinNA) <- c("A1","A2","A3","A4","A5","A6","A7","A8","A9","A10","A11","A12","A13","A14","A15","A16")
+str(sinNA)
+colSums(is.na(sinNA))
+```
+
+Para ver un poco cómo vamos y cómo van quedando los datos, vamos a hacer un resumen de cada una de las variables. Empezamos por las categóricas:
+
+```{r}
+summary(sinNA$A1)
+summary(sinNA$A4)
+summary(sinNA$A5)
+summary(sinNA$A6)
+summary(sinNA$A7)
+summary(sinNA$A9)
+summary(sinNA$A10)
+summary(sinNA$A12)
+summary(sinNA$A13)
+summary(sinNA$A16)
+```
+
+Analizando las categóricas, si comparamos con lo que se nos proporciona en la web de la uci, vemos que hay alguna variable que no tiene todos sus valores. Si nos fijamos en el apartado de "Additional Variable Information", los valores de cada una son los siguientes:
+
+```
+A1: b, a. 
+A4: u, y, l, t. 
+A5: g, p, gg. 
+A6: c, d, cc, i, j, k, m, r, q, w, x, e, aa, ff. 
+A7: v, h, bb, j, n, z, dd, ff, o. 
+A9: t, f. 
+A10: t, f. 
+A12: t, f. 
+A13: g, p, s. 
+A16: +,- (class attribute)
+```
+
+Comparando con el nuestro, podemos ver que la variable A4, en este dataset sólo contiene valores l, u, y, pero no tiene t. Por ello, vamos a incluir este nivel en nuestro conjunto de datos.
+
+```{r}
+ccredit$A4 <- factor(ccredit$A4, levels = c("u", "y", "l", "t"))
+sinNA$A4 <- factor(sinNA$A4, levels = c("u", "y", "l", "t"))
+```
+
+Como ya habíamos hecho la copia extra sin valores NA, tenemos que añadir en ella también el nivel. Al añadir el nivel "t" a A4, se incluyen todas las categorías posibles sin cambiar los datos existentes. Por ello, no es necesario comprobar NA, ya que la adición de un nivel vacío no genera valores faltantes.
+
+Continuando con las numéricas, vamos a ver el "resumen" de una forma diferente, puesto que las categóricas toman valores concretos (niveles), algo que no sucede con estas variables.
+
+```{r}
+summary(sinNA$A2)
+summary(sinNA$A3)
+summary(sinNA$A8) 
+summary(sinNA$A11)
+summary(sinNA$A14)
+summary(sinNA$A15)
+```
+
+Como podemos observar, los valores de las variables A2, A3, A8, A11 y A14 parecen estar sesgados a la izquierda. Por otro lado, la variable A15 presenta la mediana y la media muy distantes, siendo estas 5 y 1014, por lo que seleccionaremos esta, entre otras, para el posterior análisis monovariable.
+
+## Análisis Monovariable
+
+Vamos a realizar el análisis monovariable de las variables A2, A6 y A15. Seleccionamos las variables A2, A6 y A15 por ser representativas: 
+
+  - A2, por ser numérica con sesgo claro 
+  - A6, categórica con alta variabilidad de niveles 
+  - A15, numérica con outliers extremos
+
+### A.M.: Variable A2
+
+```{r}
+summary(sinNA$A2)
+```
+
+Analizando el summary de A2 vemos que es interesante analizarla puesto que, como comentamos anteriormente, parece que los datos están sesgados a la izquierda.
+
+```{r}
+dens_A2 <- density(sinNA$A2, na.rm = TRUE)
+hist(sinNA$A2, xlab = "Valores de A2",
+     main = "Histograma variable A2",
+     ylim = c(0, max(dens_A2$y) * 1.1), probability = TRUE,
+     col = "lightblue")
+rug(jitter(sinNA$A2))
+
+abline(v = mean(sinNA$A2, na.rm = TRUE), col = "yellow", lwd = 2)
+abline(v = median(sinNA$A2, na.rm = TRUE), col = "brown", lwd = 2)
+legend("topright", legend = c("Media", "Mediana"), col = c("yellow", "brown"), lwd = 2)
+
+```
+
+Viendo las cotas superiores e inferiores y la manera en la que estan distribuidos los valores, como hemos comentado, se sospecha que esta columna representa la edad. Si ejecutamos su diagrama caja-bigotes, podremos ver realmente cómo se distribuyen los valores y si hay algún extremo o outlier, ya que, según el summary ejecutado previamente, desde el tercer cuartil (38.25) hasta el valor máximo (76.75) hay bastante diferencia, lo que podría indicar la presencia de estos:
+
+```{r}
+boxplot(sinNA[2],names = c("A2"))
+```
+
+Teniendo en cuenta el diagrama resultado, vemos cómo se podría reforzar nuestra idea de que sean edades. Vemos cómo los valores se distribuyen entre 20 y 30, y que a partir de 60 se consideran que los datos son outliers.
+
+Vamos a ver cómo se comporta respecto a la clase (variable A16):
+
+```{r}
+escalas <- list(x=list(relation="free"), y=list(relation="free"))
+featurePlot(x=sinNA[,"A2"], y=as.factor(sinNA[,"A16"]), plot="density", scales=escalas, col =  c("lightblue", "brown"))
+```
+
+Se aprecia como se rechazan la gran mayoria de los créditos entre valores de 20 y 40, lo cual cuadraría con la hipótesis de que esta columna representa la edad.
+
+Si ejecutamos el QQ-plot para evaluar la normalidad,podemos ver si la variable se aleja de la normalidad, lo que puede explicar el sesgo que veíamos en el histograma:
+
+```{r}
+qqnorm(sinNA$A2)
+qqline(sinNA$A2, col="red")
+```
+
+En el QQ-plot, los puntos no se alinean perfectamente sobre la línea roja, lo que indica que la variable A2 no sigue una distribución normal. Se observa un sesgo a la izquierda, especialmente en los valores más bajos, confirmando la tendencia que detectamos en el histograma y en el resumen estadístico.
+
+Además, podemos ver el Violin plot para ver cómo se comporta con respecto a la clase A16. Este combina el boxplot y la densidad para ver cómo se distribuye A2 según se concede o no el crédito. Permite visualizar de forma clara si la edad (A2) se comporta distinto según se concede el crédito o no:
+
+```{r}
+ggplot(sinNA, aes(x=A16, y=A2, fill=A16)) +
+geom_violin(trim=FALSE) +
+geom_boxplot(width=0.1, fill="white") +
+labs(title="Distribución de A2 por clase")
+```
+
+En el violin plot, tanto la figura azul como la roja tienen forma alargada y estrecha (parecen “manta rayas”), lo que indica que la mayoría de los valores de A2 se concentran en un rango reducido. Esto coincide con el sesgo a la izquierda observado en el histograma y el QQ-plot, confirmando que la variable tiene poca dispersión y que los valores extremos son relativamente escasos.
+
+### A.M.: Variable A6:
+
+```{r}
+length(levels(sinNA$A6))
+```
+
+Vemos que hay 14 valores distintos, nos centramos ahora en su distribución.
+
+```{r}
+ggplot(sinNA, aes(x=A6)) +
+  geom_bar(fill="lightblue") +
+  labs(title="Distribucion de los valores de A6", x="Niveles", y="Frecuencia")
+```
+
+Observamos una gran diferencias entre las ocurrencias de "c" con respecto a los demás valores, con pocas ocurrencias de "j" y "r".
+
+Ahora podemos ver, mediante la siguiente gráfica, cuánto se concede el crédito en función de cada valor de A6, es decir, comparar esta con la A16:
+```{r}
+spineplot(as.factor(A16) ~ A6 , sinNA)
+```
+
+Más de un 80% de las veces que el valor es "x" se concede el crédito, más del 60% de las veces son concedidos para los valores "r", "cc" y "q". La mitad de los valores de A6("aa","d","ff","i","j",k","m") reciben un crédito en menos del 40%. Parece una propiedad correlacionada con la concesión de los créditos.
+
+Para continuar con el análisis, hemos decidido elaborar un diagrama caja-bigotes (box & whiskers) principalmente para ver los outliers de la variable.
+
+```{r}
+boxplot(sinNA[6],names = c("A6"))
+```
+
+Como podemos observar, esta variable no tiene outliers significativos, por lo que no tenemos que preocuparnos por ello.
+
+De la misma manera que en la anterior, vamos a ejecutar el QQ-plot para ver la distribución aproximada: 
+```{r}
+qqnorm(as.numeric(as.factor(sinNA$A6)))
+qqline(as.numeric(as.factor(sinNA$A6)), col="red")
+```
+
+En el QQ-plot, las barras negras se alinean consistentemente, salvo alguna excepción, sobre la línea roja, lo que indica que la distribución de los niveles de A6 (convertidos a valores numéricos) sigue de manera aproximada un patrón uniforme o “regular”, sin sesgo fuerte.
+
+### A.M.: Variable A15:
+
+Siguiendo con el mismo proceso que hemos llevado a cabo en la variable anterior, vamos ahora a analizar la variable A15.
+
+```{r}
+summary(sinNA$A15)
+```
+
+En este caso y como en A2, al ser A15 una variable numérica, vemos su summary. Vemos que es interesante analizarla puesto que la media y la mediana son muy diferentes (1014 contra 5)
+
+```{r}
+dens_A15 <- density(sinNA$A15, na.rm = TRUE)
+hist(sinNA$A15, xlab = "Valores de A15",
+     main = "Histograma variable A15",
+     ylim = c(0, max(dens_A15$y) * 1.1), probability = TRUE,
+     col = "lightblue")
+rug(jitter(sinNA$A15))
+
+abline(v = mean(sinNA$A15, na.rm = TRUE), col = "yellow", lwd = 2)
+abline(v = median(sinNA$A15, na.rm = TRUE), col = "brown", lwd = 2)
+legend("topright", legend = c("Media", "Mediana"), col = c("yellow", "brown"), lwd = 2)
+
+```
+
+Observamos que la variable tiene una concentración muy alta de valores pequeños, posiblemente muchos ceros o números bajos. La presencia de valores extremos (ouliers) influye fuertemente en la media como comentábamos anteriormente, lo que puede distorsionar análisis posteriores (por ejemplo, regresiones o escalados). Como podemos ver gracias al ruido proporcionado por rug con jitter, hay valores "sueltos" hasta 100000 (por ejemplo, entre 4000 y 6000 vemos que hay dos líneas que indican valores). Por ello, vamos a ver directamente el diagrama caja-bigotes para analizar los outliers más a fondo:
+
+```{r}
+boxplot(sinNA[15],names = c("A15"))
+```
+
+Como podemos observar, los outliers son bastante dispares, lo que hace que la "caja" del diagrama casi no se vea en la representación. Para ello, y de manera ilustrativa, vamos a analizar de forma temporal la variable sin los outliers, es decir, vamos a "recortarla" para quedarnos sólo con lo más representativo:
+
+```{r}
+Q1 <- quantile(sinNA$A15, 0.25, na.rm = TRUE)
+Q3 <- quantile(sinNA$A15, 0.75, na.rm = TRUE)
+IQR_val <- Q3 - Q1
+max_lim <- Q3 + 1.5 * IQR_val
+A15_recortada <- sinNA$A15[sinNA$A15 <= max_lim]
+
+dens_A15 <- density(A15_recortada, na.rm = TRUE)
+
+# Histograma
+hist(A15_recortada, 
+     xlab = "Valores de A15",
+     main = "Histograma variable A15 (outliers recortados)",
+     ylim = c(0, max(dens_A15$y) * 1.1), 
+     probability = TRUE,
+     col = "lightblue")
+rug(jitter(A15_recortada))
+abline(v = mean(A15_recortada, na.rm = TRUE), col = "yellow", lwd = 2)
+abline(v = median(A15_recortada, na.rm = TRUE), col = "brown", lwd = 2)
+legend("topright", legend = c("Media", "Mediana"), col = c("yellow", "brown"), lwd = 2)
+
+```
+
+Vamos a hacer también el diagrama caja-bigotes para los mismos datos, es decir, recortando los valores hasta el tercer cuartil:
+
+```{r}
+Q1 <- quantile(sinNA$A15, 0.25, na.rm = TRUE)
+Q3 <- quantile(sinNA$A15, 0.75, na.rm = TRUE)
+IQR_val <- Q3 - Q1
+max_lim <- Q3 + 1.5 * IQR_val
+
+A15_recortada <- sinNA$A15[sinNA$A15 <= max_lim]
+
+boxplot(A15_recortada, names = c("A15"), 
+        main = "Boxplot de A15 (outliers recortados)")
+```
+
+Como podemos observar en cualquiera de los dos gráficos, los datos más representativos de la variable A15 se encuentran del 0 al 100.
+
+Con el QQ-plot podemos ver la aproximación a normalidad
+
+```{r}
+qqnorm(A15_recortada)
+qqline(A15_recortada, col="red")
+```
+
+Los puntos están muy lejos de la línea roja, acercándose a ella tan solo en el rango (-1,1), lo que indica una fuerte desviación de la normalidad.
+
+La dispersión tan alta de los puntos extremos, tanto en este como en el boxplot, refleja outliers muy marcados, consistentes con los valores altos que vimos en el histograma.
+
+Veamos ahora cómo se comporta en relación a A16:
+```{r}
+ggplot(sinNA, aes(x=A16, y=log1p(A15), fill=A16)) +
+  geom_violin(trim=FALSE) +
+  geom_boxplot(width=0.1, fill="white") +
+  labs(title="Distribución log(1+A15) de A15 por clase")
+```
+
+ forma “onda” que toca el medio indica una alta densidad de valores pequeños: la parte más ancha de la “viola” representa donde se concentra la mayoría de los datos (del 0 al ~100).
+
+Cabe destacar que hemos aplicado la transformación logarítmica log1p(A15) para ver el Violin Plot con el objetivo de reducir la influencia de valores extremos y mejorar la visualización de su distribución. 
+
+
+## Análisis Multivariable
+
+```{r}
+suppressWarnings(
+  pairs.panels(
+    sinNA[, c("A2", "A3", "A8", "A14", "A15")],
+    group = sinNA$A16,
+    pch = 19,
+    main = "Análisis multivariable con A16 como variable de grupo"
+  )
+)
+```
+
+El diagrama multivariable muestra en su diagonal las distribuciones de las variables A2, A3, A8, A14 y A15, evidenciando que A8, A14 y especialmente A15 presentan un fuerte sesgo hacia valores bajos y varios valores extremos. En el triángulo superior se observan las correlaciones numéricas, donde únicamente A2 y A3 presentan una correlación moderada (0.42), mientras que el resto de relaciones son débiles. El triángulo inferior, compuesto por diagramas de dispersión, confirma que solo algunas variables presentan tendencias apreciables, mientras que en otras aparece una gran concentración de puntos cerca de cero acompañada de outliers, lo cual dificulta la detección de patrones lineales.
+
+En conjunto, las variables más prometedoras para el modelado parecen ser A2, A3 y A8, mientras que A14 y A15 requerirán transformaciones para corregir el sesgo y la amplia dispersión observada.
+
+Cabe destacar que usamos suppressWarnings() porque la función pairs.panels() genera avisos internos irrelevantes, relacionados con parámetros gráficos que no afectan al resultado. El gráfico se dibuja correctamente, así que simplemente ocultamos esos warnings para evitar ruido y mantener la salida limpia.
+
+## Tratamiento de outliers
+
+Vamos a buscar las variables que tengan mayor porcentaje de valores átipicos (outliers).
+
+### A2
+Comenzamos por la variable A2 que, como vimos en el apartado de análisis monovariable, tiene un porcentaje bajo de valores atípicos.
+
+```{r}
+a2 <- (sinNA$A2)
+statsA2 <- boxplot.stats(a2)
+atipicA2 <- statsA2$out
+porcentajeA2 <- 100 * length(atipicA2) / length(a2)
+
+print(paste("El porcentaje de datos atípicos para A2 es =", porcentajeA2))
+
+```
+Como hemos comentado, esta variable ya ha sido analizada en profundidad con el análisis monovariable. Es por ello que hemos decidido no volver a incluir representaciones como histogramas o diagramas, para evitar la repetición y la redundancia. En oposición a esta, el resto de variables que no han sido tratadas con anterioridad, sí contendrán un desarrollo un poco mayor. Este análisis inlcuye tanto el histograma como el diagrama caja-bigotes, para así poder ver los posibles outliers de la misma manera que en las representadas en el análisis monovariable. 
+
+### A3:
+
+```{r}
+a3 <- (sinNA$A3)
+statsA3 <- boxplot.stats(a3)
+atipicA3 <- statsA3$out
+porcentajeA3 <- 100 * length(atipicA3) / length(a3)
+
+print(paste("El porcentaje de datos atípicos para A3 es =", porcentajeA3))
+
+```
+Según esto, el porcentaje de datos atípicos de la variable A3 es, de la misma manera que en A2, bastante bajo. Procedemos ahora a verlo de forma gráfica mediante el histograma. 
+
+```{r}
+ggplot(sinNA, aes(x = A3)) +
+  geom_histogram(bins = 30, fill = "lightblue", color = "black", alpha = 0.7) +
+  labs(title = "Histograma de A3", x = "A3", y = "Frecuencia")
+```
+
+Al observar el histograma se aprecia que la variable presenta una distribución asimétrica hacia la derecha, con una cola prolongada. No obstante, dado que el porcentaje de valores atípicos detectado es reducido, estos casos no distorsionan de forma significativa la distribución. Para confirmarlo, procedemos a elaborar el diagrama de bigotes.
+
+```{r}
+boxplot(sinNA[3],names = c("A3"),main="Boxplot de A3")
+```
+
+Con este diagrama confirmamos lo mencionado con anterioridad ya que vemos que no hay una gran cantidad de valores fuera de rango.
+
+
+### A8:
+
+```{r}
+a8 <- (sinNA$A8)
+statsA8 <- boxplot.stats(a8)
+atipicA8 <- statsA8$out
+porcentajeA8 <- 100 * length(atipicA8) / length(a8)
+
+print(paste("El porcentaje de datos atípicos para A8 es =", porcentajeA8))
+
+```
+Comparando con las variables anteriores, ahora tenemos un número considerable de outliers, puesto que casi 1 de cada 10 valores es atípico (9% de los datos).
+```{r}
+ggplot(sinNA, aes(x = A8)) +
+  geom_histogram(bins = 30, fill = "lightblue", color = "black", alpha = 0.7) +
+  labs(title = "Histograma de A8 original", x = "A8 (original)", y = "Frecuencia")
+```
+
+Viendo el histograma comprobamos que la variable A8 tiene la mayoría de sus valores agrupados entre 0 y 10, por lo que, los que no están en ese grupo de valores, se puede decir que son outliers.
+
+Ahora vamos a analizar su diagrama caja bigotes:
+
+```{r}
+boxplot(sinNA[8],names = c("A8"),main="Boxplot de A8")
+```
+
+Podemos ver como el hecho de que había muchos outliers es cierto, ya que en el diagrama vemos la cantidad de valores fuera del rango que tiene esta variable.
+
+### A11:
+
+```{r}
+a11 <- (sinNA$A11)
+stats11 <- boxplot.stats(a11)
+atipic11 <- stats11$out
+porcentajeA11 <- 100 * length(atipic11) / length(a11)
+
+print(paste("El porcentaje de datos atípicos para A11 es =", porcentajeA11))
+
+```
+
+Si en la variable anterior pensábamos que había muchos outliers, la variable A11 presenta todavía más (más de un 12%). Viendo el histograma podremos tener una mejor visión de este hecho: 
+```{r}
+ggplot(sinNA, aes(x = A11)) +
+  geom_histogram(bins = 30, fill = "lightblue", color = "black", alpha = 0.7) +
+  labs(title = "Histograma de A11 original", x = "A11 (original)", y = "Frecuencia")
+```
+ 
+ Y complementándolo con el caja-bigotes, podremos ver más claramente cómo se organizan estos átipicos. 
+```{r}
+boxplot(sinNA[11],names = c("A11"),main="Boxplot de A11") 
+```
+
+Analizando tanto el histograma como el diagrama caja bigotes, tenemos varios valores fuera del rango y, por tanto, el valor que sale del porcentaje de outliers de la variable se demuestra con estos gráficos. En el caso del caja-bigotes, podemos ver cómo estos se encuentran, aunque fuera del rango que entendemos como datos "típicos", la mayoría están bastante cerca de estos.
+
+### A14:
+
+```{r}
+a14 <- (sinNA$A14)
+stats14 <- boxplot.stats(a14)
+atipic14 <- stats14$out
+porcentajeA14 <- 100 * length(atipic14) / length(a14)
+
+print(paste("El porcentaje de datos atípicos para A14 es =", porcentajeA14))
+
+```
+A14 presenta, como podemos ver si comparamos con el resto de variables, el menor porcentaje de datos atípicos. De todos modos, aunque no creemos que este bajo porcentaje vaya a afectar de manera negativa a los análisis, vamos a verlos con los gráficos para estudiarlos con un mayor alcance. 
+
+```{r}
+ggplot(sinNA, aes(x = A14)) +
+  geom_histogram(bins = 30, fill = "lightblue", color = "black", alpha = 0.7) +
+  labs(title = "Histograma de A14 original", x = "A14 (original)", y = "Frecuencia")
+```
+
+```{r}
+boxplot(sinNA[14],names = c("A14"),main="Boxplot de A14")
+```
+
+ este caso vemos claramente que el número de outliers es, realmente, muy reducido comparando con el resto de variables. Si nos fijamos en los diagramas, vemos como para representar los valores fuera de rango son necesarios un menor número de círculos. Lo que sí es cierto es que los datos típicos se encuentran, aproximadamente entre 0 y 700, y tenemos un dato que alcanzaría el valor 2000, por lo que igual sí es posible que afecte a los resultados. Sin embargo y como ya hemos comentado, no conocemos la naturaleza de los datos, por lo que es posible que simplemente sea un extremo y no aporte nada negativo.
+
+### A15:
+
+Como vimos en el apartado de análisis monovariable, la variable A15 tiene un porcentaje elevado (con respecto a los demás) de valores fuera de rango o atípicos.
+
+```{r}
+a15 <- (sinNA$A15)
+stats15 <- boxplot.stats(a15)
+atipic15 <- stats15$out
+porcentajeA15 <- 100 * length(atipic15) / length(a15)
+
+print(paste("El porcentaje de datos atípicos para A15 es =", porcentajeA15))
+
+```
+Como ya hemos analizado esta variable con los gráficos en el apartado comentado, podemos pasar ya a hacer una especie de conclusión de este subapartado. 
+
+A modo de resumen, podemos clasificar las variables analizadas entre variables con baja proporción de outliers y variables con gran proporción de outliers. En el primer grupo entrarían A2, A3 y A14, mientras que en el segundo incluimos A8, A11 y A15.
+
+Aunque se han identificado outliers en diversas variables, no se han modificado en esta fase del análisis porque pertenecen al contexto natural del problema y porque su tratamiento debe adaptarse a los algoritmos seleccionados posteriormente. Dado que caret permite normalizar, escalar y, en general, aplicar transformaciones, el manejo de los outliers se realizará durante el preprocesado, diferenciando entre variables con alta presencia de valores extremos y variables con porporciones menores. Por ello, este análisis ha sido completamente necesario para el desarrollo de la práctica.
+
+## Eliminación de variables superfluas
+Durante el proceso de preprocesado es fundamental identificar y retirar aquellas variables que no aportan información relevante al modelo. Estas variables, conocidas como variables superfluas, pueden introducir ruido, aumentar la complejidad del modelo o reducir su capacidad de generalización. Al suprimirlas del conjunto podemos obtener uno más compacto, eficiente y fácil de interpretar, teniendo en cuenta que esto no afecta a la capacidad predictiva.
+
+A continuación detallamos los criterios aplicados para detectar y eliminar este tipo de variables en el dataset, comenzando por aquellas que presentan poca variabilidad.
+
+### Eliminación de variables con poca varianza
+
+Las variables con poca varianza apenas aportan información útil para los modelos de clasificación, ya que sus valores apenas cambian entre observaciones. Este tipo de variables suele tener un único valor dominante y, por tanto, no contribuye a distinguir entre clases. Para comprobar si en nuestro dataset existe alguna variable de este tipo, utilizamos la función nearZeroVar() de la librería caret sobre el conjunto sinNA:
+
+```{r}
+nearZeroVar(sinNA)
+```
+
+Como podemos ver, la función que analiza si hay alguna variable que tenga poca varianza nos devuelve 0. Esto indica que no existe ninguna variable con suficiente falta de variabilidad como para justificar su eliminación. Por tanto, en esta fase del preprocesado no eliminamos ninguna variable por este criterio.
+
+### Eliminación de variables correladas
+
+Otra fuente común de información redundante en un conjunto de datos son las variables altamente correladas. Cuando dos variables presentan una alta correlación entre sí, ambas aportan prácticamente la misma información al modelo, lo que puede generar problemas como sobreajuste, mayor complejidad y un incremento innecesario del tiempo de entrenamiento.
+
+Para evaluar este aspecto, calculamos la matriz de correlaciones de las variables numéricas del dataset sinNA y analizamos si existen pares con correlación elevada (por ejemplo, superior a 0.8). Este análisis nos permite detectar posibles redundancias y decidir si alguna de estas variables debería eliminarse.
+
+```{r}
+sinNA2 <- sinNA
+sinNA2[sapply(sinNA2, is.factor)] <- lapply(sinNA2[sapply(sinNA2, is.factor)], as.numeric)
+
+cor_matrix <- cor(sinNA2[, 1:16], use = "complete.obs")
+
+corrplot(cor_matrix,
+         method = "color",
+         type = "upper",
+         order = "hclust",
+         addCoef.col = "black",
+         tl.col = "black",
+         tl.cex = 0.8,
+         number.cex = 0.6,
+         tl.srt = 45,
+         diag = FALSE)
+```
+
+Como podemos observar en la matriz de correlación anterior, las variables A4 y A5 están bastante correladas, ya que vemos un 0.98 (>0.8, como hemos seleccionado de límite) en la casilla que las relaciona. No obstante, vamos a analizar un poco más a fondo esta correlación:
+
+```{r}
+summary(sinNA$A4)
+```
+
+```{r}
+summary(sinNA$A5)
+```
+
+Como vemos, ambas variables tienen estructurados, en la misma proporción, sus valores: "u", "y", "l" y "t" (inlcuimos dicho nivel en secciones anteriores) en A4 y "g", "gg", "p" y "?" (eliminado al pasar de ccredit a sinNA) en A5. Así, vamos a eliminar la variable A4.
+
+```{r}
+sinNA$A4 <- NULL
+summary(sinNA)
+```
+Como resultado vemos, al hacer el summary, que la variable A4 ya no aparece.
+
+## Separación de datos en entrenamiento y testing
+
+Una vez concluido el análisis exploratorio, procederemos a separar el dataset en conjunto de entrenamiento y conjunto de testing, ya que, como queda explicado en la introducción, necesitamos tener los dos por separado para poder obtener resultados concluyentes.
+
+Cabe destacar que volvemos a trabajar con el conjunto de ccredit, es decir, nos olvidamos de sinNA. Esto es así porque a partir de este momento ya vamos a trabajar con el conjunto real, al cual le aplicaremos ciertas transformaciones que, como se esperaría, incluirán el tratamiento de dichos nulos.
+
+Primero, y a modo de curiosidad, vamos a ver cuál es el porcentaje total de datos de train:
+```{r}
+credit.trainIdx <- readRDS("./credit.trainIdx.rds")
+length(credit.trainIdx) / nrow(ccredit) * 100
+```
+Aquí vemos como el conjunto de entrenamiento constituye el 84.93% del conjunto de datos original. 
+
+Vamos ahora a comprobar si hay datos nulos en el conjunto de test
+```{r}
+colSums(is.na(ccredit[-credit.trainIdx, ]))
+```
+
+Podemos ver que el conjunto de test está libre de valores nulos, y por tanto, ya podemos separar ambos conjuntos.
+```{r}
+datosEntrenamiento <- ccredit[credit.trainIdx, ]
+datosTest <- ccredit[-credit.trainIdx, ]
+```
+
+Hemos decidido no eliminar outliers puesto que, al no conocer la naturaleza de las variables, no podemos estar seguros de si realmente existen outliers o si son simplemente valores atípicos. Lo que sí haremos será eliminar la variable A4 puesto que, junto con A5, son equivalentes, como hemos visto anteriormente. Puesto que lo hemos hecho en el conjunto sinNA, vamos a suprimirla ahora de ccredit.
+
+```{r}
+ccredit$A4 <- NULL
+```
+
+Como hemos separado el conjunto de entrenamiento del de testing previamente a eliminar la variable correlada, vamos a eliminarla ahora también de dichos conjuntos:
+
+```{r}
+datosEntrenamiento$A4 <- NULL
+datosTest$A4 <- NULL
+```
+
+## Imputación de nulos
+
+Vamos a generar distintos datasets para diferentes métodos de imputación de datos y contrastar cuál funciona mejor en los modelos a usar. La idea es probar técnicas sencillas y más sofisticadas para ver cuál mantiene mejor la integridad y la calidad de la información original.
+
+### Valores nulos
+
+En el primer dataset simplemente prescindiremos de las filas con valores nulos, puesto que es el más sencillo. Este enfoque es directo y no introduce sesgo, aunque reduce el tamaño del dataset.
+
+```{r}
+datosEntrenamientoSinNulos <- na.omit(datosEntrenamiento)
+(1 - nrow(datosEntrenamientoSinNulos)/nrow(datosEntrenamiento)) * 100
+
+write.csv(datosEntrenamientoSinNulos, file = "datosEntrenamientoSinNulos.csv", row.names = FALSE)
+summary(datosEntrenamientoSinNulos)
+```
+Como podemos observar, tan solo hemos perdido un 6% de los datos, lo cual es aceptable para este caso. Finalmente, guardamos el conjunto de entrenamiento limpio para poder usarlo más tarde en el entrenamiento de los modelos.
+
+Este dataset servirá como referencia para comparar los efectos de la imputación más sofisticada.
+
+### Mediana en numéricos y moda en categóricos
+
+Para el segundo dataset utilizaremos la mediana para los datos numéricos y la moda para los categóricos. La mediana es robusta frente a valores atípicos y, según nuestro análisis, la mayoría de las variables numéricas están sesgadas hacia la izquierda, por lo que este enfoque reduce el sesgo introducido por la media.
+
+
+```{r}
+datosEntrenamientoMedianaYModa <- datosEntrenamiento %>%
+  mutate(across(
+    where(is.factor),
+    ~ replace(.x, is.na(.x), names(which.max(table(.x))))
+  )) %>%
+  mutate(across(
+    where(is.numeric),
+    ~ replace(.x, is.na(.x), median(.x, na.rm = TRUE))
+  ))
+
+write.csv(datosEntrenamientoMedianaYModa, file = "datosEntrenamientoMedianaYModa.csv", row.names = FALSE)
+summary(datosEntrenamientoMedianaYModa)
+```
+Este método permite conservar todas las filas, evitando pérdida de datos, y proporciona un dataset equilibrado para el entrenamiento de modelos que no toleran nulos.
+
+### KNNImputation
+
+En el tercer dataset utilizaremos un método más potente: KNNImputation. Este enfoque se basa en los k-vecinos más cercanos y considera todas las variables a la hora de imputar un valor. A diferencia de la media o la mediana, captura relaciones no lineales entre variables, reduce el sesgo del dataset y puede mejorar los resultados de modelos complejos como Redes Neuronales o Random Forest.
+
+Al aplicar KNN, es necesario convertir las variables categóricas a numéricas , ya que KNN solo trabaja con valores numéricos. Esto lo haremos aplicando one hot encoding, de manera que
+se crean nuevos predictores, uno por nivel de cada variable categorica, conteniendo cada uno de estos valores numéricos.
+
+Lo primero que vamos a hacer entonces es convertirlo a numéricos:
+```{r}
+
+dummies_model_knn <- dummyVars(A16 ~ ., data = datosEntrenamiento)
+train_num <- predict(dummies_model_knn, newdata = datosEntrenamiento)
+test_num  <- predict(dummies_model_knn, newdata = datosTest)
+
+
+```
+
+Y posteriormente aplicamos la KNNImputation:
+```{r}
+preProc_knn <- preProcess(train_num, method = c("knnImpute", "center", "scale"))
+
+datosEntrenamientoKNN <- data.frame(predict(preProc_knn, train_num), A16 = datosEntrenamiento$A16)
+datosTestKNN          <- data.frame(predict(preProc_knn, test_num), A16 = datosTest$A16)
+
+summary(datosEntrenamientoKNN)
+
+write.csv(datosEntrenamientoKNN, file = "datosEntrenamientoKNN.csv", row.names = FALSE)
+```
+
+## Transformación de variables:
+
+Antes de entrenar cualquier modelo, es fundamental asegurar que los datos estén en una escala adecuada y que los valores extremos no distorsionen el aprendizaje. La transformación de variables permite que los modelos que dependen de la magnitud de los datos, como SVM, Redes Neuronales o Random Forest, funcionen de manera más eficiente y estable.
+
+En este proyecto hemos decidido diferenciar las variables según la proporción de valores atípicos (outliers) que presentan:
+
+ - Gran proporción de outliers: A8, A11 y A15
+
+ - Baja proporción de outliers: A2, A3 y A14
+
+Para las variables con muchos outliers aplicaremos una normalización robusta, centrando los valores en la mediana y escalándolos según el rango intercuartílico (RIC). Esto reduce el impacto de valores extremos y permite que la mayoría de los algoritmos trabajen de forma más consistente.
+
+Para las variables con pocos outliers utilizaremos una normalización Min-Max, que ajusta los valores al rango 0–1. Esta transformación mantiene la forma de la distribución y facilita comparaciones entre variables sin alterar su estructura relativa.
+
+Cada uno de los tres datasets generados previamente (SinNulos, MedianaYModa y KNNImputation) será tratado por separado para garantizar que las transformaciones respeten las características originales de cada conjunto de datos. Este paso asegura que los modelos aprendan patrones reales y no se vean sesgados por diferencias de escala o valores extremos.
+
+#### Variables con muchos valores fuera de rango (outliers)
+
+En primer lugar, aplicamos una normalización robusta con el objetivo de reducir el efecto que producen los valores extremos en aquellas variables que presentan un porcentaje elevado de outliers, identificadas en el análisis previo.
+
+El ajuste de escala permite que todas las variables queden expresadas en un mismo rango, facilitando así la interpretación de su distribución y su comparación sin que las diferencias en la magnitud original distorsionen los resultados. Además, este procedimiento evita posibles problemas con algoritmos de modelado que no son invariantes al cambio de escala.
+
+Llevamos a cabo el proceso de normalización. Lo haremos por separado para cada uno de los datasets obtenidos con anterioridad, comenzando con "sinNulos":
+
+```{r}
+datosEntrenamientoSinNulos.Normalizados=datosEntrenamientoSinNulos
+preprocSinNulos <- preProcess(datosEntrenamientoSinNulos.Normalizados[, c("A8", "A11", "A15")], method = c("center", "scale"), 
+                      center = apply(datosEntrenamientoSinNulos[, c("A8", "A11", "A15")], 2, median), 
+                      scale = apply(datosEntrenamientoSinNulos[, c("A8", "A11", "A15")], 2, IQR))
+
+datosEntrenamientoSinNulos.Normalizados[, c("A8", "A11", "A15")] <- predict(preprocSinNulos, datosEntrenamientoSinNulos.Normalizados[, c("A8", "A11", "A15")])
+head(datosEntrenamientoSinNulos.Normalizados[, c("A8", "A11", "A15")])
+
+
+```
+
+A continuación continuamos normalizando el dataset obtenido al emitir los nulos mediante la inserción de la mediana o la moda según la naturaleza de las variables:
+
+```{r}
+datosEntrenamientoMedianaYModa.Normalizados=datosEntrenamientoMedianaYModa
+preprocMedianaYModa <- preProcess(datosEntrenamientoMedianaYModa.Normalizados[, c("A8", "A11", "A15")], method = c("center", "scale"), 
+                      center = apply(datosEntrenamientoMedianaYModa[, c("A8", "A11", "A15")], 2, median), 
+                      scale = apply(datosEntrenamientoMedianaYModa[, c("A8", "A11", "A15")], 2, IQR))
+
+datosEntrenamientoMedianaYModa.Normalizados[, c("A8", "A11", "A15")] <- predict(preprocMedianaYModa, datosEntrenamientoMedianaYModa.Normalizados[, c("A8", "A11", "A15")])
+head(datosEntrenamientoMedianaYModa.Normalizados[, c("A8", "A11", "A15")])
+```
+
+Por último, normalizamos el conjunto de datos relacionado con KNNImputation:
+
+```{r}
+datosEntrenamientoKNN.Normalizados=datosEntrenamientoKNN
+preprocKNN <- preProcess(datosEntrenamientoKNN.Normalizados[, c("A8", "A11", "A15")], method = c("center", "scale"), 
+                      center = apply(datosEntrenamientoKNN[, c("A8", "A11", "A15")], 2, median), 
+                      scale = apply(datosEntrenamientoKNN[, c("A8", "A11", "A15")], 2, IQR))
+
+datosEntrenamientoKNN.Normalizados[, c("A8", "A11", "A15")] <- predict(preprocKNN, datosEntrenamientoKNN.Normalizados[, c("A8", "A11", "A15")])
+head(datosEntrenamientoKNN.Normalizados[, c("A8", "A11", "A15")])
+```
+
+Al observar los resultados, podemos verificar que la normalización se ha aplicado correctamente. Como vemos, no hay gran diferencia en los valores de cada uno de los datasets, ya que la imputación de nulos se ha realizado a un número de NAs bastante bajo, por lo que la diferencia entre los 3 procesos es prácticamente imperceptible.
+
+La aparición de valores negativos es completamente esperable, ya que este tipo de normalización sitúa el centro en la mediana y utiliza el RIC como medida de escala. Por ello, los valores negativos indican que se encuentran por debajo de la mediana, mientras que los positivos se sitúan por encima.
+
+#### Variables con pocos valores fuera de rango (outliers)
+
+Tras el análisis previo, observamos que las variables A2, A3 y A14 presentan valores atípicos, aunque en menor proporción que otras variables.
+
+Para garantizar que todos los valores estén en la misma escala y facilitar el entrenamiento de los modelos, aplicaremos una normalización Min-Max. Esta transformación ajusta los valores para que queden en el rango de 0 a 1, manteniendo la forma general de la distribución y permitiendo comparaciones coherentes entre las variables.
+
+Guardar Min y max de entrenamiento:
+```{r}
+variables_log <- c("A2", "A3", "A14")
+
+minsSinNulos <- sapply(datosEntrenamientoSinNulos.Normalizados[, variables_log], min)
+maxsSinNulos <- sapply(datosEntrenamientoSinNulos.Normalizados[, variables_log], max)
+
+minsMedianaYModa <- sapply(datosEntrenamientoMedianaYModa.Normalizados[, variables_log], min)
+maxsMedianaYModa <- sapply(datosEntrenamientoMedianaYModa.Normalizados[, variables_log], max)
+
+minsKNN <- sapply(datosEntrenamientoKNN.Normalizados[, variables_log], min)
+maxsKNN <- sapply(datosEntrenamientoKNN.Normalizados[, variables_log], max)
+```
+
+Definimos la función de normalización Min-Max:
+
+```{r}
+normalizar <- function(x, minv, maxv) (x - minv) / (maxv - minv)
+
+```
+
+Volvemos a tratar los 3 conjuntos por separado:
+
+##### 1.  SinNulos
+
+```{r}
+for (v in variables_log) {
+  datosEntrenamientoSinNulos.Normalizados[[v]] <- normalizar(datosEntrenamientoSinNulos.Normalizados[[v]], minsSinNulos[v], maxsSinNulos[v])
+}
+```
+
+##### 2.  MedianaYModa
+
+```{r}
+for (v in variables_log) {
+  datosEntrenamientoMedianaYModa.Normalizados[[v]] <- normalizar(datosEntrenamientoMedianaYModa.Normalizados[[v]], minsMedianaYModa[v], maxsMedianaYModa[v])
+}
+```
+
+##### 3.  KNN
+
+```{r}
+for (v in variables_log) {
+  datosEntrenamientoKNN.Normalizados[[v]] <- normalizar(datosEntrenamientoKNN.Normalizados[[v]], minsKNN[v], maxsKNN[v])
+}
+
+```
+
+Finalmente, verificamos que los datos se encuentren correctamente normalizados:
+
+##### 1.  SinNulos
+
+```{r}
+summary(datosEntrenamientoSinNulos.Normalizados[, c("A2", "A3", "A14")])
+```
+
+##### 2.  MedianaYModa
+
+```{r}
+summary(datosEntrenamientoMedianaYModa.Normalizados[, c("A2", "A3", "A14")])
+```
+
+##### 3.  KNN
+
+```{r}
+summary(datosEntrenamientoKNN.Normalizados[, c("A2", "A3", "A14")])
+```
+
+Los valores están ahora todos entre 0 y 1, lo que garantiza que los modelos que dependen de la escala de las variables funcionen correctamente, mientras que la forma general de la distribución se mantiene.
+
+En relación a la de KNN, se observa que los valores normalizados resultan muy similares a los valores previos a la normalización. Esto no indica un fallo en el proceso, sino que es un comportamiento esperado cuando se utiliza KNNImputation. Este método únicamente modifica las observaciones donde existían valores faltantes, manteniendo prácticamente intactas las distribuciones originales del resto de datos. Como consecuencia, los rangos y escalas de las variables apenas cambian y, por tanto, las distribuciones antes y después de normalizar son visualmente muy parecidas. Aun así, la normalización sigue siendo necesaria, especialmente en algoritmos que dependen de distancias, ya que garantiza que todas las variables tengan una contribución equilibrada en los modelos posteriores.
+
+Vamos a observarlo en gráficas comparativas para los 3 datasets:
+
+##### 1.  SinNulos
+
+```{r}
+numeric_cols <- c("A2","A3","A8","A11","A14","A15")
+
+d1 <- densityplot(
+  as.formula(paste("~", paste(numeric_cols, collapse = " + "))),
+  data = datosEntrenamientoSinNulos,
+  main = "Variables sin normalizar (Train)",
+  plot.points = FALSE
+)
+
+d2 <- densityplot(
+  as.formula(paste("~", paste(numeric_cols, collapse = " + "))),
+  data = datosEntrenamientoSinNulos.Normalizados,
+  main = "Variables normalizadas (Train)",
+  plot.points = FALSE
+)
+
+print(d1, position = c(0, 0, 0.5, 1), more = TRUE)
+print(d2, position = c(0.5, 0, 1, 1))
+```
+
+##### 2.  MedianaYModa
+
+```{r}
+numeric_cols <- c("A2","A3","A8","A11","A14","A15")
+
+d1 <- densityplot(
+  as.formula(paste("~", paste(numeric_cols, collapse = " + "))),
+  data = datosEntrenamientoMedianaYModa,
+  main = "Variables sin normalizar (Train)",
+  plot.points = FALSE
+)
+
+d2 <- densityplot(
+  as.formula(paste("~", paste(numeric_cols, collapse = " + "))),
+  data = datosEntrenamientoMedianaYModa.Normalizados,
+  main = "Variables normalizadas (Train)",
+  plot.points = FALSE
+)
+
+print(d1, position = c(0, 0, 0.5, 1), more = TRUE)
+print(d2, position = c(0.5, 0, 1, 1))
+```
+
+##### 3.  KNN
+
+```{r}
+numeric_cols <- c("A2","A3","A8","A11","A14","A15")
+
+d1 <- densityplot(
+  as.formula(paste("~", paste(numeric_cols, collapse = " + "))),
+  data = datosEntrenamientoKNN,
+  main = "Variables sin normalizar (Train)",
+  plot.points = FALSE
+)
+
+d2 <- densityplot(
+  as.formula(paste("~", paste(numeric_cols, collapse = " + "))),
+  data = datosEntrenamientoKNN.Normalizados,
+  main = "Variables normalizadas (Train)",
+  plot.points = FALSE
+)
+
+print(d1, position = c(0, 0, 0.5, 1), more = TRUE)
+print(d2, position = c(0.5, 0, 1, 1))
+```
+
+En el dataset KNN, las gráficas antes y después de normalizar son muy similares debido a que las imputaciones apenas modifican los valores originales.
+
+### Aplicar los cambios y transformaciones a los datos de Test
+
+Lo primero que haremos será copiar los datasets de test correspondientes, es decir, asignamos "datosTest" a los 3 conjuntos que usaremos para cada una de las transformaciones: 
+```{r}
+datosTest_SinNulos.Normalizados <- datosTest
+datosTest_MedianaYModa.Normalizados <- datosTest
+datosTest_KNN.Normalizados <- datosTestKNN
+```
+
+Del mismo modo que en los datos de entrenamiento, aquí diferenciaremos entre pocos y muchos outliers, por lo que vamos a tratar distinto a las variables de cada tipo. Comenzamos con las de menor porcentaje de atípicos: 
+
+```{r}
+
+for (v in variables_log) {
+  
+datosTest_SinNulos.Normalizados[[v]] <- normalizar(datosTest_SinNulos.Normalizados[[v]], minsSinNulos[v], maxsSinNulos[v])
+datosTest_MedianaYModa.Normalizados[[v]] <- normalizar(datosTest_MedianaYModa.Normalizados[[v]], minsMedianaYModa[v], maxsMedianaYModa[v])
+datosTest_KNN.Normalizados[[v]] <- normalizar(datosTest_KNN.Normalizados[[v]], minsKNN[v], maxsKNN[v])
+}
+```
+
+Continuamos ahora con las de más outliers:
+```{r}
+variables_robust <- c("A8", "A11", "A15")
+
+datosTest_SinNulos.Normalizados[, variables_robust] <- predict(preprocSinNulos, datosTest_SinNulos.Normalizados[, variables_robust])
+datosTest_MedianaYModa.Normalizados[, variables_robust] <- predict(preprocMedianaYModa, datosTest_MedianaYModa.Normalizados[, variables_robust])
+datosTest_KNN.Normalizados[, variables_robust] <- predict(preprocKNN, datosTest_KNN.Normalizados[, variables_robust])
+```
+
+Ahora comprobamos que los cambios se han realizado correctamente:
+```{r}
+summary(datosTest_SinNulos.Normalizados[, c(variables_log, variables_robust)])
+summary(datosTest_MedianaYModa.Normalizados[, c(variables_log, variables_robust)])
+summary(datosTest_KNN.Normalizados[, c(variables_log, variables_robust)])
+```
+
+# Sección 2: Entrenamiento de los potenciales modelos a usar
+Al no tener muchos datos utilizaremos Validación cruzada con 5 pliegues, esto significa que cada conjunto de datos se divide en 5 partes (folds), entrenando con 4 y validando con 1, rotando hasta que cada fold haya sido usado como validación.
+
+Repetimos el proceso 2 veces para reducir la variabilidad y obtener métricas más confiables. Esto tiene ciertas ventajas como poder aprovechar al máximo los datos disponibles. Además reduce la dependencia de la partición específica de train/test. Proporciona estimaciones más estables de métricas como Accuracy y Kappa.
+
+Para ello, primero vamos a estableces una semilla para asegurar la replicabilidad
+```{r}
+set.seed(777)
+```
+
+Y ya procedemos a declarar el proceso de validación cruzada con 5 pliegues:
+```{r}
+creditEntrenamiento5x2 <- trainControl(
+method = "repeatedcv",
+number = 5,
+repeats = 2,
+savePredictions = "final",
+classProbs = FALSE
+)
+```
+
+## Support Vector Machines (SVM)
+
+Hemos decidido entrenar un model Support Vector Machines(svm) ya que funciona especialmente bien con problemas de clasificación binaria como es el nuestro, trazando un hiperplano que distingue entre las dos clases, ademas utilizaremos una implementación de este algoritmo que no es lineal (svmRadial), ya que no tenemos certeza de que nuestra clase se comporte de esa manera. 
+
+Antes que nada hay que realizar One Hot Encoding ya que este modelo no trabaja con variables categóricas directamente.
+
+Para ello utilizaremos la función dummy_cols:
+
+```{r}
+# 1. Convertir A16 a factor (asegurado)
+datosEntrenamientoSinNulos.Normalizados$A16 <- as.factor(datosEntrenamientoSinNulos.Normalizados$A16)
+datosEntrenamientoMedianaYModa.Normalizados$A16 <- as.factor(datosEntrenamientoMedianaYModa.Normalizados$A16)
+datosEntrenamientoKNN.Normalizados$A16 <- as.factor(datosEntrenamientoKNN.Normalizados$A16)
+
+# 2. Crear dummyVars solo con las variables predictoras
+dummyObj_SinNulos <- dummyVars(~ ., data = datosEntrenamientoSinNulos.Normalizados[, setdiff(names(datosEntrenamientoSinNulos.Normalizados), "A16")], fullRank = TRUE)
+dummySinNulos <- as.data.frame(predict(dummyObj_SinNulos, newdata = datosEntrenamientoSinNulos.Normalizados))
+dummySinNulos$A16 <- datosEntrenamientoSinNulos.Normalizados$A16
+
+dummyObj_MedianaYModa <- dummyVars(~ ., data = datosEntrenamientoMedianaYModa.Normalizados[, setdiff(names(datosEntrenamientoMedianaYModa.Normalizados), "A16")], fullRank = TRUE)
+dummyMedianaYModa <- as.data.frame(predict(dummyObj_MedianaYModa, newdata = datosEntrenamientoMedianaYModa.Normalizados))
+dummyMedianaYModa$A16 <- datosEntrenamientoMedianaYModa.Normalizados$A16
+
+dummyObj_KNN <- dummyVars(~ ., data = datosEntrenamientoKNN.Normalizados[, setdiff(names(datosEntrenamientoKNN.Normalizados), "A16")], fullRank = TRUE)
+dummyKNN <- as.data.frame(predict(dummyObj_KNN, newdata = datosEntrenamientoKNN.Normalizados))
+dummyKNN$A16 <- datosEntrenamientoKNN.Normalizados$A16
+
+
+```
+
+Separaremos el conjunto entre las variables de entrada (A1-A15) y variables de salida (A16). Lo hacemos ahora, ya que al hacer el one hot encoding, las variables categóricas cambian.
+
+```{r}
+datosVarEntrenamientoSalida = "A16"
+datosVarEntrenamientoEntrada = setdiff(names(dummySinNulos), datosVarEntrenamientoSalida)
+```
+
+Vamos a probar el modelo con los distintos dataset y vamos a comprobar cual funciona mejor. Además, establecemos una nueva semilla antes del entrenamiento (set.seed(1234)) para asegurar que esta fase sea totalmente reproducible e independiente de los procesos previos realizados en el documento.
+
+```{r SVM-train, message=FALSE, warning=FALSE}
+set.seed(1234)
+
+creditEntrenamiento5x2SVM_SinNulos<-train(dummySinNulos[datosVarEntrenamientoEntrada],
+                                          dummySinNulos[[datosVarEntrenamientoSalida]],
+                                          method='svmRadial', 
+                                          trControl=creditEntrenamiento5x2)
+creditEntrenamiento5x2SVM_SinNulos
+
+creditEntrenamiento5x2SVM_MedianaYModa<-train(dummyMedianaYModa[datosVarEntrenamientoEntrada],
+                                              dummyMedianaYModa[[datosVarEntrenamientoSalida]],
+                                              method='svmRadial', 
+                                              trControl=creditEntrenamiento5x2)
+creditEntrenamiento5x2SVM_MedianaYModa
+
+#KNN crea sus propias variables por lo que las variables de entrada para este modelo serán distintas
+datosVarEntrenamientoEntradaKNN = setdiff(names(dummyKNN), datosVarEntrenamientoSalida)
+dummyKNN[[datosVarEntrenamientoSalida]] <- as.factor(dummyKNN[[datosVarEntrenamientoSalida]])
+creditEntrenamiento5x2SVM_KNN<-train(dummyKNN[datosVarEntrenamientoEntradaKNN],
+                                     dummyKNN[[datosVarEntrenamientoSalida]],
+                                     method='svmRadial', trControl=creditEntrenamiento5x2)
+creditEntrenamiento5x2SVM_KNN
+```
+Cabe destacar que en el caso de KNN, el proceso de imputación genera un conjunto de variables ligeramente diferente al de los otros dos datasets. Por ello, es necesario volver a identificar las variables de entrada específicas para este caso. Además, aseguramos que la variable de salida sea de tipo factor antes de entrenar el modelo SVM, garantizando así un funcionamiento correcto del algoritmo.
+
+Funciona ligeramente mejor con el dataset imputado por KNN usando el modelo como hiperparámetros sigma = 0.1512992 and C = 0.5.
+
+## Random Forest (RF)
+
+Random Forest es un algoritmo basado en la combinación de múltiples árboles de decisión. Cada árbol predice una clase, y la predicción final se obtiene mediante votación de mayoría. Este método reduce el sobreajuste y suele funcionar muy bien en problemas de clasificación binaria.
+
+Al igual que con SVM, es necesario aplicar One-Hot Encoding a las variables categóricas para que Random Forest pueda trabajar correctamente.
+
+### Entrenamiento de Random Forest
+
+Vamos a entrenar un modelo Random Forest para cada uno de los tres datasets generados previamente: `SinNulos`, `MedianaYModa` y `KNN`. Utilizaremos validación cruzada 5x2 para evaluar el rendimiento del modelo en cada caso.
+
+Primero vamos a tratar de nuevo las variables de entrada y de salida, asegurándonos de que esta última sea de tipo factor en los 3 datasets. 
+```{r}
+set.seed(1234)
+
+datosVarEntrenamientoSalida <- "A16"
+
+datosEntrenamientoSinNulos.Normalizados[[datosVarEntrenamientoSalida]] <- 
+  as.factor(datosEntrenamientoSinNulos.Normalizados[[datosVarEntrenamientoSalida]])
+
+datosEntrenamientoMedianaYModa.Normalizados[[datosVarEntrenamientoSalida]] <- 
+  as.factor(datosEntrenamientoMedianaYModa.Normalizados[[datosVarEntrenamientoSalida]])
+
+datosEntrenamientoKNN.Normalizados[[datosVarEntrenamientoSalida]] <- 
+  as.factor(datosEntrenamientoKNN.Normalizados[[datosVarEntrenamientoSalida]])
+datosEntrenamientoKNN.Normalizados$A16 <- as.factor(datosEntrenamientoKNN.Normalizados$A16)
+
+datosVarEntrenamientoEntrada_SinNulos <- setdiff(names(datosEntrenamientoSinNulos.Normalizados), datosVarEntrenamientoSalida)
+datosVarEntrenamientoEntrada_MedianaYModa <- setdiff(names(datosEntrenamientoMedianaYModa.Normalizados), datosVarEntrenamientoSalida)
+datosVarEntrenamientoEntrada_KNN <- setdiff(names(datosEntrenamientoKNN.Normalizados), datosVarEntrenamientoSalida)
+
+```
+
+Ahora ya pasamos a entrenar el modelo de random forest con cada uno de los 3 datasets obtenidos: 
+```{r}
+rf_SinNulos <- train(
+  datosEntrenamientoSinNulos.Normalizados[datosVarEntrenamientoEntrada_SinNulos],
+  datosEntrenamientoSinNulos.Normalizados[[datosVarEntrenamientoSalida]],
+  method = "rf",
+  trControl = creditEntrenamiento5x2
+)
+
+rf_MedianaYModa <- train(
+  datosEntrenamientoMedianaYModa.Normalizados[datosVarEntrenamientoEntrada_MedianaYModa],
+  datosEntrenamientoMedianaYModa.Normalizados[[datosVarEntrenamientoSalida]],
+  method = "rf",
+  trControl = creditEntrenamiento5x2
+)
+
+rf_KNN <- train(
+  datosEntrenamientoKNN.Normalizados[datosVarEntrenamientoEntrada_KNN],
+  datosEntrenamientoKNN.Normalizados[[datosVarEntrenamientoSalida]],
+  method = "rf",
+  trControl = creditEntrenamiento5x2
+)
+```
+
+Por último, mostramos los resultados obtenidos: 
+```{r}
+rf_SinNulos
+rf_MedianaYModa
+rf_KNN
+```
+
+### Interpretación de resultados y comparación entre datasets
+
+Los modelos Random Forest entrenados sobre los tres datasets (SinNulos, MedianaYModa y KNN) muestran un rendimiento muy similar, con accuracies alrededor del 86–87% y valores de Kappa en torno a 0.70–0.75. Estos valores indican que el modelo clasifica correctamente la mayoría de las instancias y que existe una buena concordancia entre las predicciones y la clase real.
+
+En todos los casos, el parámetro mtry óptimo es aquel que maximiza la Accuracy, y suele situarse en valores intermedios: usar muy pocas o demasiadas variables por división reduce el rendimiento.
+
+Respecto a la comparación entre datasets, las diferencias son pequeñas:
+
+1.  SinNulos y MedianaYModa obtienen resultados muy similares, mostrando que ambos métodos de imputación funcionan bien con Random Forest.
+
+2.  KNN también alcanza un rendimiento prácticamente idéntico, lo que indica que el algoritmo es robusto a las distintas estrategias de imputación.
+
+En general, Random Forest mantiene un comportamiento estable independientemente del método usado para tratar los valores ausentes, sin que un dataset destaque claramente sobre los demás. Esto sugiere que el modelo no es especialmente sensible a la técnica de imputación aplicada.
+
+Aunque los tres datasets producen resultados muy similares, el dataset imputado con Mediana y Moda muestra el rendimiento más estable y ligeramente superior, por lo que se considera la mejor opción para el modelo Random Forest.
+
+## Redes neuronales artificiales (ANN):
+
+Las Redes Neuronales son modelos predictivos inspirados en el funcionamiento del sistema neuronal biológico. Su estructura está formada por unidades de procesamiento (neuronas) organizadas en capas: una capa de entrada, una o varias capas ocultas y una capa de salida. Cada neurona aplica una transformación a sus entradas mediante un conjunto de pesos que se ajustan a lo largo del entrenamiento mediante el algoritmo de retropropagación del error (backpropagation).
+
+El objetivo principal de este modelo es aprender representaciones intermedias capaces de capturar relaciones no lineales entre las variables predictoras y la variable de salida. En este trabajo se utiliza el modelo nnet proporcionado por el paquete caret, que implementa un perceptrón multicapa de una única capa oculta.
+
+Para el experimento se entrenaron tres redes neuronales, una por cada conjunto de datos derivado del preprocesamiento.
+
+El objetivo es analizar si el método de imputación de datos influye en el rendimiento de la red neuronal y determinar cuál de los tres procesos produce un dataset más adecuado para este modelo.
+
+Lo primero que haremos es la conversión de la variable objetivo A16 a factor para asegurar que el modelo de red neuronal la trate correctamente como variable categórica.
+```{r}
+
+dummySinNulos$A16 <- as.factor(dummySinNulos$A16)
+dummyMedianaYModa$A16 <- as.factor(dummyMedianaYModa$A16)
+dummyKNN$A16 <- as.factor(dummyKNN$A16)
+```
+
+Así ya podemos entrenar el modelo para cada uno de los datasets. 
+
+Cabe destacar que El parámetro tuneLength = 5 sirve para indicar que se probarán diferentes combinaciones de neuronas en la capa oculta (size) y valores de regularización (decay). Además, La validación cruzada 5x2, definida previamente en creditEntrenamiento5x2, asegura una evaluación robusta del rendimiento del modelo.
+```{r}
+nnet_SinNulos <- train(
+  A16 ~ .,
+  data = dummySinNulos,
+  method = "nnet",
+  trControl = creditEntrenamiento5x2,
+  tuneLength = 5,
+  trace = FALSE
+)
+
+nnet_MedianaYModa <- train(
+  A16 ~ .,
+  data = dummyMedianaYModa,
+  method = "nnet",
+  trControl = creditEntrenamiento5x2,
+  tuneLength = 5,
+  trace = FALSE
+)
+
+nnet_KNN <- train(
+  A16 ~ .,
+  data = dummyKNN,
+  method = "nnet",
+  trControl = creditEntrenamiento5x2,
+  tuneLength = 5,
+  trace = FALSE
+)
+```
+
+Y por último, mostramos los resultados:
+```{r}
+nnet_SinNulos
+nnet_MedianaYModa
+nnet_KNN
+
+nnet_SinNulos$bestTune
+nnet_MedianaYModa$bestTune
+nnet_KNN$bestTune
+
+```
+
+### Interpretación de los resultados
+
+Tras ejecutar los tres modelos, se observan las siguientes conclusiones:
+
+#### Dataset SinNulos
+
+El modelo obtiene su mejor rendimiento con aproximadamente un 85 % (0.8525021) de precisión. Los hiperparámetros seleccionados fueron una capa oculta con cinco neuronas y un valor de regularización elevado (decay = 0.1). Este comportamiento sugiere que la red neuronal se beneficia de un cierto grado de complejidad, pero requiere un nivel considerable de regularización para evitar el sobreajuste. En términos generales, este conjunto de datos parece preservar relaciones naturales entre variables sin introducir ruido artificial asociado a los métodos de imputación.
+
+#### Dataset MedianaYModa
+
+La mejor precisión obtenida es aproximadamente del 84 % (0.8422063). En este caso, el mejor modelo utiliza solo una neurona en la capa oculta, lo que indica que el dataset imputado por mediana y moda reduce la variabilidad del conjunto de datos y limita la capacidad del modelo para aprender patrones más complejos. Una arquitectura más compleja no proporciona mejor rendimiento, lo que confirma que este tipo de imputación tiende a simplificar en exceso la estructura de los datos.
+
+#### Dataset KNN
+
+El modelo alcanza una precisión alrededor del 83 % (0.8387151). La mejor configuración incluye tres neuronas en la capa oculta y un valor de regularización elevado. El método de imputación basado en vecinos más cercanos tiende a introducir correlaciones artificiales entre las variables, lo cual afecta negativamente a modelos como las redes neuronales, que aprenden relaciones internas entre atributos.
+
+#### Conclusión general
+
+El conjunto de datos que produce el mejor rendimiento en el modelo de red neuronal es el dataset SinNulos, seguido por el dataset imputado mediante MedianaYModa y, finalmente, el dataset imputado mediante KNN. Esta tendencia coincide con los resultados observados en modelos anteriores como SVM y Random Forest, lo que refuerza la conclusión de que el dataset sin imputación presenta una representación más coherente y útil para los modelos predictivos aplicados en este estudio.
+
+## MODELO LDA:
+
+En este apartado hemos decidido utilizar LDA como modelo adicional por dos motivos principales. En primer lugar, LDA funciona especialmente bien en problemas con una dimensionalidad moderada, como es nuestro caso, ya que presenta una baja tendencia al sobreajuste cuando el número de predictores no es demasiado elevado. En segundo lugar, se trata de un algoritmo computacionalmente muy eficiente, con gran rapidez computacional, lo que lo hace adecuado para datasets de tamaño medio como este, con 690 observaciones.
+
+El modelo Linear Discriminant Analysis (LDA) se ha evaluado siguiendo la misma metodología aplicada al resto de modelos. Para comparar su comportamiento bajo diferentes estrategias de imputación, hemos entrenado tres modelos independientes utilizando los datasets SinNulos, MedianaYModa y KNN, todos ellos transformados mediante one-hot encoding y normalización (center y scale) debido a que LDA requiere predictores exclusivamente numéricos y es sensible a cambios en la escala.
+
+La validación cruzada 5×2 permite obtener una estimación estable del rendimiento para cada conjunto. Tras el entrenamiento, se observa que el mejor resultado lo ofrecía el dataset sinNulos con un accuracy del 86,3%, motivo por el cual este fue seleccionado como conjunto final para el modelo LDA. 
+
+Aunque LDA destaca por su simplicidad, rapidez computacional e interpretación clara de las fronteras de decisión.
+
+```{r LDA-train, message=FALSE, warning=FALSE}
+
+
+# Semilla para replicabilidad
+
+set.seed(777)
+
+# Entrenar modelo LDA con validación cruzada 5x2
+
+LDA_SinNulos <- train(
+A16 ~ .,
+data = dummySinNulos,
+method = "lda",
+trControl = creditEntrenamiento5x2,
+preProcess = NULL
+)
+
+LDA_MedianaYMedia <- train(
+A16 ~ .,
+data = dummyMedianaYModa,
+method = "lda",
+trControl = creditEntrenamiento5x2,
+preProcess = NULL
+)
+
+LDA_KNN <- train(
+A16 ~ .,
+data = dummyKNN,
+method = "lda",
+trControl = creditEntrenamiento5x2,
+preProcess = NULL
+)
+
+LDA_SinNulos
+LDA_MedianaYMedia
+LDA_KNN
+
+LDA_SinNulos$bestTune
+LDA_MedianaYMedia$bestTune
+LDA_KNN$bestTune
+```
+Los resultados muestran que LDA alcanza un buen rendimiento en clasificación binaria, con un Accuracy promedio de 85,3 % y Kappa de 0.727 en validación cruzada. Esto indica que las predicciones del modelo coinciden de manera consistente con las clases reales, y que el preprocesamiento aplicado es adecuado para obtener métricas fiables y comparables. LDA se confirma como un modelo eficiente y estable, útil como referencia frente a otros modelos más complejos. Destacar que el modelo con mejores métricas en entrenamiento es el entrenado con el dataset
+sin nulos.
+
+En resumen, el modelo LDA entrenado demuestra ser una herramienta eficiente para la clasificación binaria, con métricas de rendimiento sólidas. Su implementación es directa, la interpretación de los resultados es clara y los resultados coinciden con los patrones observados en otros modelos, mostrando que el preprocesamiento de los datos y la correcta definición de factores son esenciales para obtener resultados confiables y reproducibles. La combinación de validación cruzada y preprocesamiento garantiza que las métricas de Accuracy y Kappa sean robustas y representativas del desempeño real del modelo.
+
+
+# Sección 3: Comparar modelos
+
+Para seleccionar el modelo final, se realiza una comparación sistemática de todos los modelos entrenados con sus distintos preprocesamientos. Se evalúan métricas clave como Accuracy y Kappa, lo que permite no solo identificar el modelo con mejor rendimiento promedio, sino también comprobar su consistencia y robustez frente a distintos conjuntos de datos. Este análisis es fundamental para decidir qué modelo utilizará el dataset final y asegurará generalización a datos nuevos.
+
+```{r comparar_modelos, message=FALSE, warning=FALSE}
+# Función para extraer métricas de los modelos
+extraer_metrics <- function(modelo, nombre_modelo, preproc){
+  res <- modelo$results
+  mejor <- res[which.max(res$Accuracy),]
+  data.frame(
+    Modelo = nombre_modelo,
+    Preprocesamiento = preproc,
+    Accuracy = mejor$Accuracy,
+    Kappa = mejor$Kappa,
+    MejorTune = paste(names(mejor)[grepl("size|decay|mtry|C|sigma", names(mejor))],
+                      mejor[grepl("size|decay|mtry|C|sigma", names(mejor))], sep="=", collapse = ", ")
+  )
+}
+
+# Extraer métricas de todos los modelos
+svm_results <- bind_rows(
+  extraer_metrics(creditEntrenamiento5x2SVM_SinNulos, "SVM Radial", "SinNulos"),
+  extraer_metrics(creditEntrenamiento5x2SVM_MedianaYModa, "SVM Radial", "MedianaYModa"),
+  extraer_metrics(creditEntrenamiento5x2SVM_KNN, "SVM Radial", "KNN")
+)
+
+rf_results <- bind_rows(
+  extraer_metrics(rf_SinNulos, "Random Forest", "SinNulos"),
+  extraer_metrics(rf_MedianaYModa, "Random Forest", "MedianaYModa"),
+  extraer_metrics(rf_KNN, "Random Forest", "KNN")
+)
+
+nnet_results <- bind_rows(
+  extraer_metrics(nnet_SinNulos, "Red Neuronal", "SinNulos"),
+  extraer_metrics(nnet_MedianaYModa, "Red Neuronal", "MedianaYModa"),
+  extraer_metrics(nnet_KNN, "Red Neuronal", "KNN")
+)
+
+lda_results <- data.frame(
+  extraer_metrics(LDA_SinNulos, "LDA", "SinNulos"),
+  extraer_metrics(LDA_MedianaYMedia, "LDA", "MedianaYModa"),
+  extraer_metrics(LDA_KNN, "LDA", "KNN")
+)
+
+# Combinar todos los resultados
+comparacion_modelos <- bind_rows(rf_results, nnet_results, svm_results, lda_results)
+comparacion_modelos <- comparacion_modelos %>% arrange(desc(Accuracy))
+
+# Mostrar tabla comparativa
+print(comparacion_modelos)
+
+# Selección del mejor modelo y entrenamiento final
+mtry_optimo <- comparacion_modelos %>%
+  filter(Modelo == "Random Forest", Preprocesamiento == "SinNulos") %>%
+  pull(MejorTune)
+
+set.seed(1234)
+modelo_final_rf <- train(
+  dummySinNulos[datosVarEntrenamientoEntrada],
+  dummySinNulos[[datosVarEntrenamientoSalida]],
+  method = "rf",
+  trControl = trainControl(method = "repeatedcv", number = 5, repeats = 2),
+  tuneGrid = data.frame(mtry = 18)
+)
+
+# Resumen del modelo final
+print(modelo_final_rf)
+
+
+```
+
+El análisis de comparación muestra que Random Forest entrenado sobre el dataset SinNulos y MedianaYModa obtiene los valores más altos y consistentes de Accuracy (\~0.86) y Kappa (\~0.72), indicando que este modelo no solo es preciso, sino también estable frente a distintas particiones de los datos. Las redes neuronales y SVM presentan valores ligeramente inferiores y mayor dispersión, lo que sugiere que su rendimiento es más sensible a los distintos preprocesamientos. LDA, aunque muestra un Accuracy aceptable (\~0.856), queda en la posición más baja respecto a los demás modelos, confirmando que Random Forest es la opción más robusta y confiable.
+
+Para visualizar de manera más intuitiva la comparación de modelos, se emplean gráficas de resamples, incluyendo boxplots, density plots y dotplots que muestran la distribución de Accuracy y Kappa de cada modelo.
+
+```{r comparar_modelos1, message=FALSE, warning=FALSE}
+
+
+
+# Preparar lista de modelos para la función resamples
+
+lista_modelos <- list(
+RandomForest_SinNulos = modelo_final_rf,
+RedNeuronal_SinNulos = nnet_SinNulos,
+RedNeuronal_MedianaYModa = nnet_MedianaYModa,
+RedNeuronal_KNN = nnet_KNN,
+SVM_SinNulos = creditEntrenamiento5x2SVM_SinNulos,
+SVM_MedianaYModa = creditEntrenamiento5x2SVM_MedianaYModa,
+SVM_KNN = creditEntrenamiento5x2SVM_KNN,
+LDA_SinNulos = LDA_SinNulos,
+LDA_MedianaYMedia = LDA_MedianaYMedia,
+LDA_KNN = LDA_KNN,
+RF_MedianaYModa = rf_MedianaYModa,
+RF_KNN = rf_KNN
+)
+
+# Crear objeto resamples para comparar métricas
+
+resultados <- resamples(lista_modelos)
+
+# Boxplot de Kappa
+
+bw_plot <- bwplot(resultados, metric = "Kappa", main = "Boxplot - Kappa")
+
+# Density plot de Accuracy y Kappa
+
+density_plot_acc <- densityplot(resultados, metric = "Accuracy", main = "Density Plot - Accuracy")
+density_plot_kappa <- densityplot(resultados, metric = "Kappa", main = "Density Plot - Kappa")
+
+# Dotplot de Accuracy
+
+dot_plot_acc <- dotplot(resultados, metric = "Accuracy", main = "Dotplot - Accuracy")
+
+# Mostrar gráficas combinadas
+
+grid.arrange(bw_plot, density_plot_acc, ncol = 2)
+grid.arrange(density_plot_kappa, dot_plot_acc, ncol = 2)
+
+```
+
+Las gráficas confirman que Random Forest con preprocesamiento SinNulos mantiene los valores más altos y consistentes tanto de Accuracy como de Kappa, mostrando menor dispersión en comparación con las redes neuronales y SVM. Los boxplots permiten observar visualmente la estabilidad de cada modelo, mientras que los density plots muestran que Random Forest concentra su rendimiento en valores elevados, reforzando su confiabilidad. Los dotplots complementan la información mostrando la precisión promedio con intervalos de confianza, destacando claramente la superioridad de Random Forest frente a los demás modelos.
+
+En conclusión, basándonos en los resultados cuantitativos y gráficos, el modelo final seleccionado es Random Forest con preprocesamiento MedianaYModa y mtry = 2 Este modelo combina alto rendimiento, estabilidad y capacidad de generalización, asegurando resultados robustos en datos nuevos y consolidándose como la mejor opción para el problema de clasificación planteado.
+
+
+
+```{r comparar_modelosTest, message=FALSE, warning=FALSE}
+## Crear dummies para los datasets de TEST
+
+
+# SinNulos
+dummyTest_SinNulos <- as.data.frame(predict(dummyObj_SinNulos, newdata = datosTest_SinNulos.Normalizados))
+dummyTest_SinNulos$A16 <- as.factor(datosTest_SinNulos.Normalizados$A16)  # asegurar factor
+
+# MedianaYModa
+dummyTest_MedianaYModa <- as.data.frame(predict(dummyObj_MedianaYModa, newdata = datosTest_MedianaYModa.Normalizados))
+dummyTest_MedianaYModa$A16 <- as.factor(datosTest_MedianaYModa.Normalizados$A16)
+
+# KNN
+dummyTest_KNN <- as.data.frame(predict(dummyObj_KNN, newdata = datosTest_KNN.Normalizados))
+dummyTest_KNN$A16 <- as.factor(datosTest_KNN.Normalizados$A16)
+
+## Predicción SVM
+
+# Columnas que espera el modelo SVM
+svm_predictors_SinNulos <- setdiff(colnames(creditEntrenamiento5x2SVM_SinNulos$trainingData), ".outcome")
+svm_predictors_MedianaYModa <- setdiff(colnames(creditEntrenamiento5x2SVM_MedianaYModa$trainingData), ".outcome")
+svm_predictors_KNN <- setdiff(colnames(creditEntrenamiento5x2SVM_KNN$trainingData), ".outcome")
+
+pred_SVM_SinNulos <- predict(creditEntrenamiento5x2SVM_SinNulos, dummyTest_SinNulos[, svm_predictors_SinNulos])
+confusionMatrix(pred_SVM_SinNulos, dummyTest_SinNulos$A16)
+
+pred_SVM_MedianaYModa <- predict(creditEntrenamiento5x2SVM_MedianaYModa, dummyTest_MedianaYModa[, svm_predictors_MedianaYModa])
+confusionMatrix(pred_SVM_MedianaYModa, dummyTest_MedianaYModa$A16)
+
+pred_SVM_KNN <- predict(creditEntrenamiento5x2SVM_KNN, dummyTest_KNN[, svm_predictors_KNN])
+confusionMatrix(pred_SVM_KNN, dummyTest_KNN$A16)
+
+# El test de SVM da unos resultados solidos de 85% de accuaracy de media, destacando el modelo entrenado por el dataset *.
+
+## Predicción Random Forest
+
+pred_RF_SinNulos <- predict(rf_SinNulos, datosTest_SinNulos.Normalizados)
+confusionMatrix(pred_RF_SinNulos, datosTest_SinNulos.Normalizados$A16)
+
+pred_RF_MedianaYModa <- predict(rf_MedianaYModa, datosTest_MedianaYModa.Normalizados)
+confusionMatrix(pred_RF_MedianaYModa, datosTest_MedianaYModa.Normalizados$A16)
+
+pred_RF_KNN <- predict(rf_KNN, datosTest_KNN.Normalizados)
+confusionMatrix(pred_RF_KNN, datosTest_KNN.Normalizados$A16)
+
+# El modelo random forest tiene un accuaracy muy alto en test, de un 91% de media, siendo el modelo entrenado prescindiendo de los valores nulos el que mejor resultados obtiene*.
+
+## Predicción ANN
+
+
+pred_NNET_SinNulos <- predict(nnet_SinNulos, dummyTest_SinNulos)
+confusionMatrix(pred_NNET_SinNulos, dummyTest_SinNulos$A16)
+
+pred_NNET_MedianaYModa <- predict(nnet_MedianaYModa, dummyTest_MedianaYModa)
+confusionMatrix(pred_NNET_MedianaYModa, dummyTest_MedianaYModa$A16)
+
+pred_NNET_KNN <- predict(nnet_KNN, dummyTest_KNN)
+confusionMatrix(pred_NNET_KNN, dummyTest_KNN$A16)
+
+#Redes neuronales también da muy buenos resultados, con un accuaracy medio de 87,5%. Tanto el modelo entrenado con el dataset sin nulos como el entrenado con el dataset imputado
+#por la mediana y la moda dan exactamente la misma precisión, por lo que podemos asumir que es menos sensible a las transformaciones en los datos de entrada.*
+
+#Predicción LDA
+
+
+pred_LDA_SinNulos <- predict(LDA_SinNulos, dummyTest_SinNulos)
+confusionMatrix(pred_LDA_SinNulos, dummyTest_SinNulos$A16)
+
+pred_LDA_MedianaYModa <- predict(LDA_MedianaYMedia, dummyTest_MedianaYModa)
+confusionMatrix(pred_LDA_MedianaYModa, dummyTest_MedianaYModa$A16)
+
+pred_LDA_KNN <- predict(LDA_KNN, dummyTest_KNN)
+confusionMatrix(pred_LDA_KNN, dummyTest_KNN$A16)
+
+#LDA da unos resultados similares a SVM con una media de 85% de acuarracy.
+
+get_metrics <- function(pred, truth) {
+  cm <- confusionMatrix(pred, truth)
+  return(c(Accuracy = cm$overall['Accuracy'], Kappa = cm$overall['Kappa']))
+}
+
+# Construir la tabla de resultados
+lista_resultados_test <- list(
+  SVM_SinNulos = get_metrics(pred_SVM_SinNulos, dummyTest_SinNulos$A16),
+  SVM_Mediana  = get_metrics(pred_SVM_MedianaYModa, dummyTest_MedianaYModa$A16),
+  SVM_KNN      = get_metrics(pred_SVM_KNN, dummyTest_KNN$A16),
+  RF_SinNulos  = get_metrics(pred_RF_SinNulos, datosTest_SinNulos.Normalizados$A16),
+  RF_Mediana   = get_metrics(pred_RF_MedianaYModa, datosTest_MedianaYModa.Normalizados$A16),
+  RF_KNN       = get_metrics(pred_RF_KNN, datosTest_KNN.Normalizados$A16),
+  NNET_SinNulos = get_metrics(pred_NNET_SinNulos, dummyTest_SinNulos$A16),
+  NNET_Mediana  = get_metrics(pred_NNET_MedianaYModa, dummyTest_MedianaYModa$A16),
+  NNET_KNN      = get_metrics(pred_NNET_KNN, dummyTest_KNN$A16),
+  LDA_SinNulos  = get_metrics(pred_LDA_SinNulos, dummyTest_SinNulos$A16),
+  LDA_Mediana   = get_metrics(pred_LDA_MedianaYModa, dummyTest_MedianaYModa$A16),
+  LDA_KNN       = get_metrics(pred_LDA_KNN, dummyTest_KNN$A16)
+)
+
+# Convertir a data frame
+df_resultados <- as.data.frame(do.call(rbind, lista_resultados_test))
+df_resultados$Modelo <- rownames(df_resultados)
+
+colnames(df_resultados) <- c("Accuracy", "Kappa", "Modelo")
+
+# 3. Transformar datos para ggplot (formato largo)
+df_plot <- pivot_longer(df_resultados, cols = c("Accuracy", "Kappa"), 
+                        names_to = "Metrica", values_to = "Valor")
+
+# 4. Generar el gráfico comparativo
+ggplot(df_plot, aes(x = Modelo, y = Valor, fill = Metrica)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  coord_flip() + # Volteamos para leer mejor los nombres de los modelos
+  theme_minimal() +
+  labs(title = "Comparativa de Modelos en Test",
+       y = "Rendimiento", x = "Modelo") +
+  ylim(0, 1)
+```
+
+## Conclusión
+
+En términos globales, el análisis comparativo refleja un rendimiento altamente satisfactorio para los cuatro modelos evaluados, ya que todos ellos superan el 85% de precisión. Este desempeño uniforme confirma que el proceso de limpieza y preprocesamiento de los datos ha sido adecuado, proporcionando una base sólida que permite a los diferentes algoritmos capturar patrones de clasificación fiables y efectivos.
+
+Al examinar los resultados detallados, el modelo de Random Forest sobresale con la mayor capacidad predictiva, logrando un 92% de precisión. En contraste, algoritmos como SVM y LDA han ofrecido resultados ligeramente inferiores, situándose en un 85%. Si bien es cierto que estos últimos poseen una arquitectura más sencilla que, en otros contextos, se traduciría en una ventaja competitiva por su mayor eficiencia computacional, la diferencia en la exactitud de sus predicciones sugiere una pérdida de capacidad de generalización que es importante considerar.
+
+Finalmente, tras valorar el equilibrio entre precisión y coste operativo, hemos determinado que Random Forest es la elección óptima. Dado que el tamaño de nuestro conjunto de datos es moderado y el tiempo necesario para el entrenamiento no representa una limitación técnica crítica, la superioridad en el rendimiento de este modelo justifica plenamente su implementación. En conclusión, la fiabilidad y precisión exhibidas por Random Forest lo consolidan como la herramienta más robusta y adecuada para las necesidades de este proyecto.
+
+## Referencias
+
+SVM:  https://www.datacamp.com/tutorial/support-vector-machines-r
+      https://es.wikipedia.org/wiki/M%C3%A1quina_de_vectores_de_soporte
